@@ -1,1 +1,1 @@
-# first_-competition
+# first_competition

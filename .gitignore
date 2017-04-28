@@ -1,0 +1,6 @@
+checkpoint
+*.index
+*.meta
+*.pyc
+*.data-00000-of-00001
+

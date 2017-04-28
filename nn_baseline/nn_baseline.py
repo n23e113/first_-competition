@@ -8,6 +8,7 @@ from copy import deepcopy
 import itertools
 import tensorflow as tf
 
+sys.path.append("..")
 from q2_initialization import xavier_weight_init
 
 tf.logging.set_verbosity(tf.logging.ERROR)

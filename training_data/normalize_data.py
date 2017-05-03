@@ -13,7 +13,9 @@ Training_Data_File = 'aiwar_train_data'
 if Global_Debug :
   Training_Data_File = '_data'
  
-Normalized_File = 'normalized_training_data'
+Tabbed_File = 'tabbed_training_data'
+Undersample_Tabbed_File = 'undersample_tabbed_training_data'
+Oversample_Tabbed_File = 'oversample_tabbed_training_data'
 # 顺便统计一下训练数据的分类，记录到这个文件里面
 Statistic_File = 'training_data_statistic'
 
@@ -131,35 +133,71 @@ def condiction_on_gender(gender_dict, brand_dict, apps_dict, province_dict, line
   sys.stdout.write('\n')
   return male_brand_dict, male_apps_dict, male_province_dict, female_brand_dict, female_apps_dict, female_province_dict
     
-def to_normalized_file():
+def to_tabbed_file():
   gender_dict, brand_dict, apps_dict, province_dict, lines = distinct_features_from_org_training_data()
   chunk_list = chunks(lines, 50000)
     
   with ProcessPoolExecutor(multiprocessing.cpu_count()) as executor:
-    ret_list = executor.map(
-      functools.partial(map_to_normalized_file, gender_dict, brand_dict, apps_dict, province_dict), chunk_list)
+    map_ret = executor.map(
+      functools.partial(mapreduce_to_tabbed_file, gender_dict, brand_dict, apps_dict, province_dict), chunk_list)
   sys.stdout.write('\n')
   sys.stdout.flush()
   
-  with codecs.open(Normalized_File, 'w', 'utf-8') as f:
-    for l in ret_list:
-      if Global_Debug:
-        print l[0]
-      f.writelines(l)
-      
+  male_datas = []
+  female_datas = []
+  ret_list = []
+  
+  print '^'
+  for l in map_ret:
+    ret_list += l
+
+  print '^'
+  for l in ret_list:
+    features = extract_features(l)
+    if features[1] == u'male':
+      male_datas.append(l)
+    else:
+      female_datas.append(l)
+   
+  print '^'
+  undersample_datas = []
+  for i in xrange(min(len(male_datas), len(female_datas))):
+    undersample_datas.append(male_datas[i])
+    undersample_datas.append(female_datas[i])
+  with codecs.open(Undersample_Tabbed_File, 'w', 'utf-8') as f:
+    f.writelines(undersample_datas)
+     
+  print '^'
+  oversample_datas = []
+  for i in xrange(max(len(male_datas), len(female_datas))):
+    oversample_datas.append(male_datas[i % len(male_datas)])
+    oversample_datas.append(female_datas[i % len(female_datas)])
+  with codecs.open(Oversample_Tabbed_File, 'w', 'utf-8') as f:
+    f.writelines(oversample_datas)
+  
+  print '^'
+  with codecs.open(Tabbed_File, 'w', 'utf-8') as f:
+    if Global_Debug:
+      print ret_list[0]
+    f.writelines(ret_list)
+  print '^'
+  
   if Global_Debug:
-    from_normalized_file_to_original_data(Normalized_File, gender_dict, brand_dict, apps_dict, province_dict)
+    from_normalized_file_to_original_data(Tabbed_File, gender_dict, brand_dict, apps_dict, province_dict)
     
   save_statistics_file(Statistic_File + '_brands', brand_dict)
   save_statistics_file(Statistic_File + '_gender', gender_dict)
   save_statistics_file(Statistic_File + '_province', province_dict)
   save_statistics_file(Statistic_File + '_applist', apps_dict)
-  with open(Statistic_File, 'w') as f:
-    f.write('brands count ' + str(len(brand_dict)) + '\n')
-    f.write('gender count ' + str(len(gender_dict)) + '\n')
-    f.write('province count ' + str(len(province_dict)) + '\n')
-    f.write('applist count ' + str(len(apps_dict)) + '\n')
-    f.write('applist max number ' + str(apps_dict.keys()[len(apps_dict) - 1]) + '\n')
+  
+  statistic_dict = {}
+  statistic_dict['brands count'] = len(brand_dict)
+  statistic_dict['gender count'] = len(gender_dict)
+  statistic_dict['province count'] = len(province_dict)
+  statistic_dict['applist count'] = len(apps_dict)
+  statistic_dict['applist max number'] = apps_dict.keys()[len(apps_dict) - 1]
+  save_statistics_file(Statistic_File, statistic_dict)
+  print '^'
   
   # 看看以性别为前提的分布
   male_brand_dict, male_apps_dict, male_province_dict, female_brand_dict, female_apps_dict, female_province_dict = condiction_on_gender(
@@ -170,8 +208,9 @@ def to_normalized_file():
   save_statistics_file(Statistic_File + '_brands_female', female_brand_dict)
   save_statistics_file(Statistic_File + '_province_female', female_province_dict)
   save_statistics_file(Statistic_File + '_applist_female', female_apps_dict)
+  print '^'
   
-def map_to_normalized_file(gender_dict, brand_dict, apps_dict, province_dict, lines):
+def mapreduce_to_tabbed_file(gender_dict, brand_dict, apps_dict, province_dict, lines):
   #print 'gender', len(gender_dict), gender_dict
   #print 'brand', len(brand_dict)
   #print 'app list', len(apps_dict), apps_dict.keys()[len(apps_dict) - 1]
@@ -220,13 +259,14 @@ def map_to_normalized_file(gender_dict, brand_dict, apps_dict, province_dict, li
   sys.stdout.flush()
   return feature_out
 
-# 从格式化好的文件，读取数据，返回nparray
-def normalize_data_from_file():
-  ret = {}
+# 从格式化好的文件，读取数据
+# 注意
+# 1.格式化文件内，性别，机器型号，省份是没有编码的，需要在这个函数内用onehot编码
+# 2.tab文件内，第一列是编号，没有作用，需要去掉
+def tabbed_file_to_nparray_file():
   
-  pd.read
   
   return 
 
 if __name__ == "__main__":
-  to_normalized_file()
+  to_tabbed_file()

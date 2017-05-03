@@ -14,6 +14,10 @@ training_data_statistic_province_female
 training_data_statistic_province_male
 aiwar_train_data
 aiwar_train_data.gz
+oversample_tabbed_training_data
+tabbed_data.tar.bz2
+tabbed_training_data
+undersample_tabbed_training_data
 *.index
 *.meta
 *.pyc

@@ -76,9 +76,12 @@ dumy_data_input_pos = np.concatenate(
 dumy_data_input_neg = np.concatenate(
   (dumy_data_input_apps_neg, dumy_data_input_province_neg, dumy_data_input_computer_brand_neg), axis=1)
 dumy_data_input = np.concatenate((dumy_data_input_pos, dumy_data_input_neg), axis=0)
-dumy_data_label = np.concatenate((np.ones(debug_sample, dtype=np.int), np.zeros(debug_sample, dtype=np.int)), axis=0)
+dumy_data_pos_label = np.concatenate((np.ones((debug_sample, 1)), np.zeros((debug_sample, 1))), axis=1)
+dumy_data_neg_label = np.concatenate((np.zeros((debug_sample, 1)), np.ones((debug_sample, 1))), axis=1)
+dumy_data_label = np.concatenate((dumy_data_pos_label, dumy_data_neg_label), axis=0)
 print 'one pos sample', dumy_data_input_pos[0]
 print 'one neg sample', dumy_data_input_neg[0]
+print 'one pos sample label', dumy_data_label[0]
 
 class NN_Baseline_Model():
 
@@ -112,13 +115,15 @@ class NN_Baseline_Model():
     self.input_placeholder = tf.placeholder(
       tf.float32, shape=(None, self.config.input_dim), name='NN_Baseline_Input')
     self.dropout_placeholder = tf.placeholder(tf.float32, name='NN_Baseline_Dropout')
-    self.label_placeholder = tf.placeholder(tf.int32, shape=(None), name='NN_Baseline_Label')
+    self.label_placeholder = tf.placeholder(tf.float32, shape=(None, self.config.output_class), name='NN_Baseline_Label')
 
   def build_loss_op(self, logits, labels):
     #print 'logits.shape', logits.get_shape()
     reg_losses = tf.reduce_sum(tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES))
     #print 'reg_losses.shape', reg_losses.get_shape()
-    loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels, logits=logits, name='NN_Baseline_CE_Per_Example')
+    #print logits.shape
+    #print labels.shape
+    loss = tf.nn.weighted_cross_entropy_with_logits(targets=labels, logits=logits, pos_weight=1.0, name='NN_Baseline_CE_Per_Example')
     #print 'loss.shape', loss.get_shape()
     loss = tf.reduce_sum(loss, name='NN_Baseline_CE')
     #print 'reduce sum loss.shape', loss.get_shape()
@@ -246,8 +251,9 @@ class NN_Baseline_Model():
     return np.mean(total_loss), predict_result
 
 def make_conf(labels, predictions):
-  #print labels
-  #print predictions
+  labels = np.argmax(labels, axis=1)
+  #print labels.shape
+  #print predictions.shape
   confmat = np.zeros([2, 2])
   for l,p in itertools.izip(labels, predictions):
     confmat[l, p] += 1

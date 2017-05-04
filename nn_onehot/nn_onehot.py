@@ -1,5 +1,6 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL']='3'
+import os.path
 import getpass
 import sys
 import time
@@ -7,11 +8,18 @@ import numpy as np
 from copy import deepcopy
 import itertools
 import tensorflow as tf
+import unicodecsv as csv
+from concurrent.futures import ProcessPoolExecutor
 
 sys.path.append("..")
 from q2_initialization import xavier_weight_init
 
 tf.logging.set_verbosity(tf.logging.ERROR)
+
+Global_Debug = False
+Undersample_Numpy_Array_File = '../training_data/undersample_numpy_array.npy'
+Undersample_Numpy_Array_Files = '../training_data/undersample_numpy_array_'
+Statistics_Path = '../training_data/training_data_statistic'
 
 # Let's set the parameters of our model
 # http://arxiv.org/pdf/1409.2329v4.pdf shows parameters that would achieve near
@@ -24,67 +32,86 @@ province onehot encoding [0, 0, 0, 1, 0, 0, ...., 0] dim = 26
 computer brand onehot encoding [1, 0, 0, 0, 0] dim = brands count
 x = [0, 0, 0, 1, 1, 0, 0, 0, 0, ..., 0, 1, 1, 0, 0, 0, 0]
      ^..apps.....^  ^......province.....^  ^....brand..^
-y = 0 or 1
+y = 0, 1 or 1, 0
 '''
 
+def load_statistics_file(file):
+  dict = {}
+  for key, val in csv.reader(open(file), encoding='utf-8'):
+    dict[key] = val
+  return dict
+
 class Config(object):
-  batch_size = 64
-  apps_dim = 100
-  province_dim = 34
-  computer_brand_dim = 20
-  input_dim = apps_dim + province_dim + computer_brand_dim
-  hidden_size_1 = 100
-  hidden_size_2 = 100
-  output_class = 2
-  max_epochs = 10
-  early_stopping = 2
-  dropout = 0.5
-  lr = 0.001
-  l2 = 0.0
+  def __init__(self):
+    self.batch_size = 256
+    self.apps_dim = 100
+    self.province_dim = 34
+    self.computer_brand_dim = 20
+    self.input_dim = self.apps_dim + self.province_dim + self.computer_brand_dim
+    self.hidden_size_1 = 10
+    self.hidden_size_2 = 5
+    self.output_class = 2
+    self.max_epochs = 10
+    self.early_stopping = 2
+    self.dropout = 1.0
+    self.lr = 0.01
+    self.l2 = 0.0
+    
+    if Global_Debug == False:
+      statistic_dict = load_statistics_file(Statistics_Path)
+      self.computer_brand_dim = int(statistic_dict['brands count'])
+      self.province_dim = int(statistic_dict['province count'])
+      self.apps_dim = int(statistic_dict['applist max number'])
+      self.input_dim = self.apps_dim + self.province_dim + self.computer_brand_dim
 
-# for debug purpose
-debug_sample = 4096
-debug_config = Config()
-# install apps onehot + onthot + ... + onehot
-# concat [sample, appsdim / 2 = random 0 1], [sample, appsdim / 2 = 0] = [sample, appsdim]
-dumy_data_input_apps_pos = np.concatenate(
-  (np.random.randint(0, 2, size=(debug_sample, debug_config.apps_dim / 2)),
-    np.zeros((debug_sample, debug_config.apps_dim / 2), dtype=np.int)), axis=1)
-print 'dumy_data_input_apps_pos.shape',dumy_data_input_apps_pos.shape
-# province onehot encoding, [debug_sample, province_dim]
-dumy_data_input_province_pos = np.zeros(
-  (debug_sample, debug_config.province_dim), dtype=np.int)
-dumy_data_input_province_pos[
-    np.arange(debug_sample), np.random.randint(0, debug_config.province_dim, debug_sample)] = 1
-print 'dumy_data_input_province_pos.shape',dumy_data_input_province_pos.shape
-# computer brand onehot encoding, [debug_sample, computer_brand_dim]
-dumy_data_input_computer_brand_pos = np.zeros(
-  (debug_sample, debug_config.computer_brand_dim), dtype=np.int)
-dumy_data_input_computer_brand_pos[
-    np.arange(debug_sample), np.random.randint(0, debug_config.computer_brand_dim, debug_sample)] = 1
-print 'dumy_data_input_computer_brand_pos.shape',dumy_data_input_computer_brand_pos.shape
-# concat [sample, appsdim / 2 = 0], [sample, appsdim / 2 = random 0 1] = [sample, appsdim]
-dumy_data_input_apps_neg = np.concatenate(
-  (np.zeros((debug_sample, debug_config.apps_dim / 2), dtype=np.int),
-    np.random.randint(0, 2, size=(debug_sample, debug_config.apps_dim / 2))), axis=1)
-# not care province and brand
-dumy_data_input_province_neg = dumy_data_input_province_pos
-dumy_data_input_computer_brand_neg = dumy_data_input_computer_brand_pos
+def generate_debug_data():
+  # for debug purpose
+  debug_sample = 4096
+  debug_config = Config()
+  # install apps onehot + onthot + ... + onehot
+  # concat [sample, appsdim / 2 = random 0 1], [sample, appsdim / 2 = 0] = [sample, appsdim]
+  dummy_data_input_apps_pos = np.concatenate(
+    (np.random.randint(0, 2, size=(debug_sample, debug_config.apps_dim / 2)),
+      np.zeros((debug_sample, debug_config.apps_dim / 2), dtype=np.int)), axis=1)
+  print 'dummy_data_input_apps_pos.shape',dummy_data_input_apps_pos.shape
+  # province onehot encoding, [debug_sample, province_dim]
+  dummy_data_input_province_pos = np.zeros(
+    (debug_sample, debug_config.province_dim), dtype=np.int)
+  dummy_data_input_province_pos[
+      np.arange(debug_sample), np.random.randint(0, debug_config.province_dim, debug_sample)] = 1
+  print 'dummy_data_input_province_pos.shape',dummy_data_input_province_pos.shape
+  # computer brand onehot encoding, [debug_sample, computer_brand_dim]
+  dummy_data_input_computer_brand_pos = np.zeros(
+    (debug_sample, debug_config.computer_brand_dim), dtype=np.int)
+  dummy_data_input_computer_brand_pos[
+      np.arange(debug_sample), np.random.randint(0, debug_config.computer_brand_dim, debug_sample)] = 1
+  print 'dummy_data_input_computer_brand_pos.shape',dummy_data_input_computer_brand_pos.shape
+  # concat [sample, appsdim / 2 = 0], [sample, appsdim / 2 = random 0 1] = [sample, appsdim]
+  dummy_data_input_apps_neg = np.concatenate(
+    (np.zeros((debug_sample, debug_config.apps_dim / 2), dtype=np.int),
+      np.random.randint(0, 2, size=(debug_sample, debug_config.apps_dim / 2))), axis=1)
+  # not care province and brand
+  dummy_data_input_province_neg = dummy_data_input_province_pos
+  dummy_data_input_computer_brand_neg = dummy_data_input_computer_brand_pos
+  
+  dummy_data_input_pos = np.concatenate(
+    (dummy_data_input_apps_pos, dummy_data_input_province_pos, dummy_data_input_computer_brand_pos), axis=1)
+  dummy_data_input_neg = np.concatenate(
+    (dummy_data_input_apps_neg, dummy_data_input_province_neg, dummy_data_input_computer_brand_neg), axis=1)
+  dummy_data_input = np.concatenate((dummy_data_input_pos, dummy_data_input_neg), axis=0)
+  dummy_data_pos_label = np.concatenate((np.ones((debug_sample, 1)), np.zeros((debug_sample, 1))), axis=1)
+  dummy_data_neg_label = np.concatenate((np.zeros((debug_sample, 1)), np.ones((debug_sample, 1))), axis=1)
+  dummy_data_label = np.concatenate((dummy_data_pos_label, dummy_data_neg_label), axis=0)
+  print 'one pos sample', dummy_data_input_pos[0]
+  print 'one neg sample', dummy_data_input_neg[0]
+  print 'one pos sample label', dummy_data_label[0]
+  return dummy_data_input, dummy_data_label
 
-dumy_data_input_pos = np.concatenate(
-  (dumy_data_input_apps_pos, dumy_data_input_province_pos, dumy_data_input_computer_brand_pos), axis=1)
-dumy_data_input_neg = np.concatenate(
-  (dumy_data_input_apps_neg, dumy_data_input_province_neg, dumy_data_input_computer_brand_neg), axis=1)
-dumy_data_input = np.concatenate((dumy_data_input_pos, dumy_data_input_neg), axis=0)
-dumy_data_pos_label = np.concatenate((np.ones((debug_sample, 1)), np.zeros((debug_sample, 1))), axis=1)
-dumy_data_neg_label = np.concatenate((np.zeros((debug_sample, 1)), np.ones((debug_sample, 1))), axis=1)
-dumy_data_label = np.concatenate((dumy_data_pos_label, dumy_data_neg_label), axis=0)
-print 'one pos sample', dumy_data_input_pos[0]
-print 'one neg sample', dumy_data_input_neg[0]
-print 'one pos sample label', dumy_data_label[0]
-
+def mapreduce_load_nparray(i):
+  print i
+  return np.load(Undersample_Numpy_Array_Files + str(i) + '.npy')
+  
 class NN_Baseline_Model():
-
   def load_data(self, debug=False):
     '''
     load data from ndarray file
@@ -99,15 +126,42 @@ class NN_Baseline_Model():
       self.test =  = self.train[:num_debug]
     '''
     # for debug purpose
-    self.train_data = {}
-    self.valid_data = {}
-    self.test_data = {}
-    self.train_data['input'] = dumy_data_input
-    self.train_data['label'] = dumy_data_label
-    self.valid_data['input'] = dumy_data_input
-    self.valid_data['label'] = dumy_data_label
-    self.test_data['input'] = dumy_data_input
-    self.test_data['label'] = dumy_data_label
+    if debug:
+      self.train_data = {}
+      self.valid_data = {}
+      self.test_data = {}
+      dummy_data_input, dummy_data_label = generate_debug_data()
+      self.train_data['input'] = dummy_data_input
+      self.train_data['label'] = dummy_data_label
+      self.valid_data['input'] = dummy_data_input
+      self.valid_data['label'] = dummy_data_label
+      self.test_data['input'] = dummy_data_input
+      self.test_data['label'] = dummy_data_label
+    else:
+      if os.path.isfile(Undersample_Numpy_Array_File):
+        print 'load npy file ...'
+        data = np.load(Undersample_Numpy_Array_File)
+      else:
+        print 'load npy files ...'
+        #with ProcessPoolExecutor(5) as executor:
+        map_ret = map(mapreduce_load_nparray, range(10))
+        data = np.concatenate(tuple(array for array in map_ret), axis=0)
+        np.random.shuffle(data)
+        np.save(Undersample_Numpy_Array_File, data)
+      data_len = data.shape[0]
+      print 'data_len', data_len
+      train_data, valid_data, test_data = np.split(data, [int(data_len * 0.7), int(data_len * 0.85)], axis=0)
+      print 'train_data len', train_data.shape[0]
+      print 'valid_data len', valid_data.shape[0]
+      print 'test_data len', test_data.shape[0]
+      self.train_data = {}
+      self.valid_data = {}
+      self.test_data = {}
+      self.train_data['label'], self.train_data['input'] = np.split(train_data, [2], axis=1)
+      assert(self.train_data['label'].shape[1] == 2)
+      assert(self.train_data['input'].shape[1] == config.input_dim)
+      self.valid_data['label'], self.valid_data['input'] = np.split(valid_data, [2], axis=1)
+      self.test_data['label'], self.test_data['input'] = np.split(test_data, [2], axis=1)
     #print self.train_data['input']
     #print self.train_data['label']
 
@@ -196,7 +250,7 @@ class NN_Baseline_Model():
 
   def __init__(self, config):
     self.config = config
-    self.load_data(debug=False)
+    self.load_data(Global_Debug)
     self.setup_placeholders()
     self.linear_output = self.build_model(self.input_placeholder, self.dropout_placeholder)
     self.calculate_loss, self.train_predict = self.build_loss_op(self.linear_output, self.label_placeholder)
@@ -210,7 +264,7 @@ class NN_Baseline_Model():
     total_loss = []
     predict_result = None
     predict_op = self.train_predict
-    if not train_op:
+    if train_op is None:
       train_op = tf.no_op()
       predict_op = self.predict_op
       dp = 1.0
@@ -237,8 +291,8 @@ class NN_Baseline_Model():
         sys.stdout.write('\r{} / {} : loss = {}'.format(
           step, data['input'].shape[0], np.mean(total_loss)))
         sys.stdout.flush()
-      if predict != None:
-        if predict_result == None:
+      if predict is not None:
+        if predict_result is None:
           predict_result = predict
           #print 'predict.shape', predict.shape
           #raw_input()
@@ -257,7 +311,9 @@ def make_conf(labels, predictions):
   confmat = np.zeros([2, 2])
   for l,p in itertools.izip(labels, predictions):
     confmat[l, p] += 1
-  return confmat
+  print confmat
+  print 'tpr', confmat[0, 0] * 1.0 / (confmat[0, 0] + confmat[0, 1])
+  print 'tnr', confmat[1, 1] * 1.0 / (confmat[1, 0] + confmat[1, 1])
 
 if __name__ == "__main__":
   config = Config()
@@ -265,6 +321,7 @@ if __name__ == "__main__":
 
   init = tf.initialize_all_variables()
   saver = tf.train.Saver()
+  valid_save = tf.train.Saver()
   session_config = tf.ConfigProto()
   session_config.gpu_options.allow_growth = True
 
@@ -274,20 +331,25 @@ if __name__ == "__main__":
     save_path = None
     session.run(init)
     for epoch in xrange(config.max_epochs):
-      print 'Epoch {}'.format(epoch)
+      print '** Epoch {}'.format(epoch)
       start = time.time()
 
       train_loss, prediction = model.run_epoch(
           session, model.train_data, train_op=model.train_op)
       print 'Training loss: {}'.format(train_loss)
-      print make_conf(model.train_data['label'], prediction)
-      valid_loss, prediction = model.run_epoch(session, model.valid_data)
-      print 'Validation loss: {}'.format(valid_loss)
-      print make_conf(model.valid_data['label'], prediction)
+      make_conf(model.train_data['label'], prediction)
+      
+      with tf.Session(config=session_config) as valid_session:
+        valid_model_path = valid_save.save(session, './nn_baseline.valid_weights')
+        valid_save.restore(valid_session, valid_model_path)
+        valid_loss, prediction = model.run_epoch(session, model.valid_data)
+        print 'Validation loss: {}'.format(valid_loss)
+        make_conf(model.valid_data['label'], prediction)
+        
       if valid_loss < best_val:
         best_val = valid_loss
         best_val_epoch = epoch
-        save_path = saver.save(session, './nn_baseline.weights')
+        save_path = saver.save(session, './nn_baseline.best_weights')
         print('Model saved in file: %s' % save_path)
       if epoch - best_val_epoch > config.early_stopping:
         break
@@ -295,5 +357,5 @@ if __name__ == "__main__":
 
     saver.restore(session, save_path)
     test_loss, test_predict = model.run_epoch(session, model.test_data)
-    print 'Test loss: {}'.format(test_loss)
-    print make_conf(model.test_data['label'], test_predict)
+    print '** Test loss: {}'.format(test_loss)
+    make_conf(model.test_data['label'], test_predict)

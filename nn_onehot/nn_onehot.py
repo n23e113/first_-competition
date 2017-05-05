@@ -47,7 +47,7 @@ class Config(object):
     self.apps_dim = 100
     self.province_dim = 34
     self.computer_brand_dim = 20
-    self.input_dim = self.apps_dim + self.province_dim + self.computer_brand_dim
+    self.input_dim = self.computer_brand_dim + self.province_dim + self.apps_dim
     self.hidden_size_1 = 10
     self.hidden_size_2 = 5
     self.output_class = 2
@@ -314,7 +314,11 @@ def make_conf(labels, predictions):
   print confmat
   print 'tpr', confmat[0, 0] * 1.0 / (confmat[0, 0] + confmat[0, 1])
   print 'tnr', confmat[1, 1] * 1.0 / (confmat[1, 0] + confmat[1, 1])
-
+  tp = confmat[0, 0] + confmat[0, 1]
+  fp = confmat[1, 0]
+  fn = confmat[0, 1]
+  print 'f1=2tp/(2tp+fp+fn):', 2.0*tp/(2.0*tp + fp + fn)
+  
 if __name__ == "__main__":
   config = Config()
   model = NN_Baseline_Model(config)

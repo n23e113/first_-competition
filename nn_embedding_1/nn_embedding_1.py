@@ -73,15 +73,15 @@ class Config(object):
     self.input_dim = self.apps_dim + self.province_onehot_dim  + self.computer_brand_onehot_dim
     self.province_embedding_dim = 4
     self.computer_brand_embedding_dim = 8
-    self.hidden_input_dim = self.apps_dim + self.province_embedding_dim + self.computer_brand_embedding_dim
-    self.hidden_size_1 = 100
-    self.hidden_size_2 = 100
+    self.hidden_input_dim = self.computer_brand_embedding_dim + self.province_embedding_dim + self.apps_dim
+    self.hidden_size_1 = 10
+    self.hidden_size_2 = 5
     self.output_class = 2
     self.max_epochs = 10
     self.early_stopping = 2
-    self.dropout = 0.5
+    self.dropout = 1.0
     self.lr = 0.01
-    self.l2 = 0.5
+    self.l2 = 0.0
     
     if Global_Debug == False:
       statistic_dict = load_statistics_file(Statistics_Path)
@@ -366,8 +366,12 @@ def make_conf(labels, predictions):
   for l,p in itertools.izip(labels, predictions):
     confmat[l, p] += 1
   print confmat
-  print 'tpr', confmat[0, 0] * 1.0 / (confmat[0, 0] + confmat[0, 1])
-  print 'tnr', confmat[1, 1] * 1.0 / (confmat[1, 0] + confmat[1, 1])
+  print 'tpr:', confmat[0, 0] * 1.0 / (confmat[0, 0] + confmat[0, 1])
+  print 'tnr:', confmat[1, 1] * 1.0 / (confmat[1, 0] + confmat[1, 1])
+  tp = confmat[0, 0] + confmat[0, 1]
+  fp = confmat[1, 0]
+  fn = confmat[0, 1]
+  print 'f1=2tp/(2tp+fp+fn):', 2.0*tp/(2.0*tp + fp + fn)
 
 if __name__ == "__main__":
   config = Config()
@@ -401,6 +405,7 @@ if __name__ == "__main__":
         make_conf(model.valid_data['label'], prediction)
         
       if valid_loss < best_val:
+        print '** {} < {}'.format(valid_loss, best_val)
         best_val = valid_loss
         best_val_epoch = epoch
         save_path = saver.save(session, './nn_baseline.best_weights')

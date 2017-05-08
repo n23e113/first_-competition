@@ -20,7 +20,6 @@ tabbed_training_data
 undersample_tabbed_training_data
 __t
 split
-train_log
 *.npy
 *.index
 *.meta

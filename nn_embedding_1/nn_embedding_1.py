@@ -58,6 +58,9 @@ map:
   
 '''
 
+def leaky_relu(x, alpha):
+  return tf.maximum(alpha*x, x)
+
 def load_statistics_file(file):
   dict = {}
   for key, val in csv.reader(open(file), encoding='utf-8'):
@@ -66,7 +69,7 @@ def load_statistics_file(file):
 
 class Config(object):
   def __init__(self):
-    self.batch_size = 256
+    self.batch_size = 64
     self.apps_dim = 100
     self.province_onehot_dim  = 34
     self.computer_brand_onehot_dim = 20
@@ -295,9 +298,9 @@ class NN_Baseline_Model():
         tf.constant_initializer(0.0)
       )
     print tf.concat([computer_brand, province, apps_onehot], 1).shape
-    local1 = tf.nn.relu(tf.matmul(tf.nn.dropout(
-      tf.concat([computer_brand, province, apps_onehot], 1), dropout), h1) + b1)
-    local2 = tf.nn.relu(tf.matmul(tf.nn.dropout(local1, dropout), h2) + b2)
+    local1 = leaky_relu(tf.matmul(tf.nn.dropout(
+      tf.concat([computer_brand, province, apps_onehot], 1), dropout), h1) + b1, 0.1)
+    local2 = leaky_relu(tf.matmul(tf.nn.dropout(local1, dropout), h2) + b2, 0.1)
     linear_output = tf.matmul(tf.nn.dropout(local2, dropout), output_weights) + output_bias
 
     return linear_output

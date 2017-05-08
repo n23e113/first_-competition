@@ -35,6 +35,9 @@ x = [0, 0, 0, 1, 1, 0, 0, 0, 0, ..., 0, 1, 1, 0, 0, 0, 0]
 y = 0, 1 or 1, 0
 '''
 
+def leaky_relu(x, alpha):
+  return tf.maximum(alpha*x, x)
+
 def load_statistics_file(file):
   dict = {}
   for key, val in csv.reader(open(file), encoding='utf-8'):
@@ -48,14 +51,15 @@ class Config(object):
     self.province_dim = 34
     self.computer_brand_dim = 20
     self.input_dim = self.computer_brand_dim + self.province_dim + self.apps_dim
-    self.hidden_size_1 = 10
-    self.hidden_size_2 = 5
+    self.hidden_size_1 = 128
+    self.hidden_size_2 = 64
+    self.hidden_size_3 = 16
     self.output_class = 2
-    self.max_epochs = 10
-    self.early_stopping = 2
+    self.max_epochs = 100
+    self.early_stopping = 5
     self.dropout = 1.0
     self.lr = 0.01
-    self.l2 = 0.0
+    self.l2 = 0.002
     
     if Global_Debug == False:
       statistic_dict = load_statistics_file(Statistics_Path)
@@ -226,10 +230,25 @@ class NN_Baseline_Model():
         tf.float32,
         tf.constant_initializer(0.0)
       )
+      
+      h3 = tf.get_variable(
+        'Hidden_Layer_3',
+        [self.config.hidden_size_2, self.config.hidden_size_3],
+        tf.float32,
+        xavier_weight_init(),
+        tf.contrib.layers.l2_regularizer(self.config.l2)
+      )
+
+      b3 = tf.get_variable(
+        'Bias_3',
+        [self.config.hidden_size_3],
+        tf.float32,
+        tf.constant_initializer(0.0)
+      )
 
       output_weights = tf.get_variable(
         'Output_Layer',
-        [self.config.hidden_size_2, self.config.output_class],
+        [self.config.hidden_size_3, self.config.output_class],
         tf.float32,
         xavier_weight_init(),
         tf.contrib.layers.l2_regularizer(self.config.l2)
@@ -242,9 +261,10 @@ class NN_Baseline_Model():
         tf.constant_initializer(0.0)
       )
 
-    local1 = tf.nn.relu(tf.matmul(tf.nn.dropout(inputs, dropout), h1) + b1)
-    local2 = tf.nn.relu(tf.matmul(tf.nn.dropout(local1, dropout), h2) + b2)
-    linear_output = tf.matmul(tf.nn.dropout(local2, dropout), output_weights) + output_bias
+    local1 = leaky_relu(tf.matmul(tf.nn.dropout(inputs, dropout), h1) + b1, 0.1)
+    local2 = leaky_relu(tf.matmul(tf.nn.dropout(local1, dropout), h2) + b2, 0.1)
+    local3 = leaky_relu(tf.matmul(tf.nn.dropout(local2, dropout), h3) + b3, 0.1)
+    linear_output = tf.matmul(tf.nn.dropout(local3, dropout), output_weights) + output_bias
 
     return linear_output
 

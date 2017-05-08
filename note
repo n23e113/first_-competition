@@ -1,0 +1,13 @@
+feature selection ?
+* ? brand province app introduce unknow tag
+* - try remove xavier_weight_init
+* applist=>nn=>embedding
+statistics need condiction on applist
+* ? introduce leakyrelu
+introduce batch normalize
+tensorflow read data pipeline
+residual net ?
+need cross valid ?
+undersample => oversample ?
+1d conv net ?
+

@@ -1,0 +1,3 @@
+brand province introduce embedding
+input -> embedding -> nn -> sigmoid
+      \- linear ----------/      

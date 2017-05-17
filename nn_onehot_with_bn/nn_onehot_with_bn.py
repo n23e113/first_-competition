@@ -131,7 +131,7 @@ class NN_Baseline_Model():
     if Undersample_Array == False:
       sample_array_file = Oversample_Numpy_Array_File
       sample_array_files = Oversample_Numpy_Array_Files
-      file_count = 8
+      file_count = 15
     if debug:
       self.train_data = {}
       self.valid_data = {}
@@ -179,6 +179,7 @@ class NN_Baseline_Model():
       tf.float32, shape=(None, self.config.input_dim), name='NN_Baseline_Input')
     self.dropout_placeholder = tf.placeholder(tf.float32, name='NN_Baseline_Dropout')
     self.label_placeholder = tf.placeholder(tf.float32, shape=(None, self.config.output_class), name='NN_Baseline_Label')
+    self.phase_placeholder = tf.placeholder(tf.bool, name='phase')
 
   def build_loss_op(self, logits, labels):
     #print 'logits.shape', logits.get_shape()
@@ -200,10 +201,12 @@ class NN_Baseline_Model():
     return tf.argmax(tf.exp(logits), 1)
 
   def build_training_op(self, loss):
-    train_op = tf.train.AdamOptimizer(self.config.lr).minimize(loss)
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+      train_op = tf.train.AdamOptimizer(self.config.lr).minimize(loss)
     return train_op
 
-  def build_model(self, inputs, dropout):
+  def build_model(self, inputs, dropout, phase):
 
     with tf.variable_scope('NN_Baseline') as scope:
       h1 = tf.get_variable(
@@ -266,18 +269,38 @@ class NN_Baseline_Model():
         tf.constant_initializer(0.0)
       )
 
-    local1 = leaky_relu(tf.matmul(tf.nn.dropout(inputs, dropout), h1) + b1, 0.1)
-    local2 = leaky_relu(tf.matmul(tf.nn.dropout(local1, dropout), h2) + b2, 0.1)
-    local3 = leaky_relu(tf.matmul(tf.nn.dropout(local2, dropout), h3) + b3, 0.1)
-    linear_output = tf.matmul(tf.nn.dropout(local3, dropout), output_weights) + output_bias
-
+    local1 = tf.matmul(tf.nn.dropout(inputs, dropout), h1) + b1
+    # do not apply activation function in bn, use leakyrelu
+    bn1 = tf.contrib.layers.batch_norm(local1, center=True, scale=True, 
+                                       is_training=phase, activation_fn=None,
+                                       zero_debias_moving_mean=True,
+                                       scope='bn1')
+    activate1 = leaky_relu(bn1, 0.1)
+    
+    local2 = tf.matmul(tf.nn.dropout(activate1, dropout), h2) + b2
+    # do not apply activation function in bn, use leakyrelu
+    bn2 = tf.contrib.layers.batch_norm(local2, center=True, scale=True, 
+                                       is_training=phase, activation_fn=None,
+                                       zero_debias_moving_mean=True,
+                                       scope='bn2')
+    activate2 = leaky_relu(bn2, 0.1)
+    
+    local3 = tf.matmul(tf.nn.dropout(activate2, dropout), h3) + b3
+    # do not apply activation function in bn, use leakyrelu
+    bn3 = tf.contrib.layers.batch_norm(local3, center=True, scale=True, 
+                                       is_training=phase, activation_fn=None,
+                                       zero_debias_moving_mean=True,
+                                       scope='bn3')
+    activate3 = leaky_relu(bn3, 0.1)
+    
+    linear_output = tf.matmul(tf.nn.dropout(activate3, dropout), output_weights) + output_bias    
     return linear_output
 
   def __init__(self, config):
     self.config = config
     self.load_data(Global_Debug)
     self.setup_placeholders()
-    self.linear_output = self.build_model(self.input_placeholder, self.dropout_placeholder)
+    self.linear_output = self.build_model(self.input_placeholder, self.dropout_placeholder, self.phase_placeholder)
     self.calculate_loss, self.train_predict = self.build_loss_op(self.linear_output, self.label_placeholder)
     self.predict_op = self.build_prediction(self.linear_output)
     self.train_op = self.build_training_op(self.calculate_loss)
@@ -289,10 +312,15 @@ class NN_Baseline_Model():
     total_loss = []
     predict_result = None
     predict_op = self.train_predict
+    train_phase = True
     if train_op is None:
+      print 'phase prediction ...'
+      train_phase = False
       train_op = tf.no_op()
       predict_op = self.predict_op
       dp = 1.0
+    else:
+      print 'phase training ...'
     #total_steps = data['input'].shape[0] / self.config.batch_size
     for step in xrange(0, data['input'].shape[0], self.config.batch_size):
       #begin = step
@@ -308,7 +336,8 @@ class NN_Baseline_Model():
       #print 'x.shape, y.shape', x.shape, y.shape
       feed = {self.input_placeholder: x,
               self.label_placeholder: y,
-              self.dropout_placeholder: dp}
+              self.dropout_placeholder: dp,
+              self.phase_placeholder: train_phase}
       loss, predict, _ = session.run(
         [self.calculate_loss, predict_op, train_op], feed_dict=feed)
       total_loss.append(loss)
@@ -348,7 +377,7 @@ if __name__ == "__main__":
   config = Config()
   model = NN_Baseline_Model(config)
 
-  init = tf.initialize_all_variables()
+  init = tf.global_variables_initializer()
   saver = tf.train.Saver()
   valid_save = tf.train.Saver()
   session_config = tf.ConfigProto()

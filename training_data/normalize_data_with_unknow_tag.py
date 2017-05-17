@@ -14,7 +14,7 @@ Global_Debug = False
 Training_Data_File = 'aiwar_train_data'
 
 if Global_Debug :
-  Training_Data_File = '_data'
+  Training_Data_File = 'unittest'
  
 Tabbed_File = 'tabbed_training_data'
 Undersample_Tabbed_File = 'undersample_tabbed_training_data'
@@ -27,14 +27,34 @@ Oversample_Numpy_Array_File = 'oversample_numpy_array_'
 Statistic_File = 'training_data_statistic'
 
 # 统计少于100个的brand，都归到unknow类，数据太少，覆盖不到
-Brand_Unknow_Threshold = 100
+Brand_Unknow_Threshold = 10
 # 统计少于100个的app，归到unknow类
-App_Unknow_Threshold = 100
+App_Unknow_Threshold = 10
+# 统计少于100个的province，归到unknow类
+Province_Unknow_Threshold = 10
+if Global_Debug:
+  Brand_Unknow_Threshold = 2
+  App_Unknow_Threshold = 2
+  Province_Unknow_Threshold = 2
 
 def extract_features(line):
   features = line.split('\t')
   return features
 
+def threshold_dict_with_unknow(d, t, digit=False):
+  unknow = 0
+  dict_with_unknow = {}
+  for k, v in d.iteritems():
+    if v < t:
+      unknow += v
+    else:
+      dict_with_unknow[k] = v
+  if digit:
+    dict_with_unknow[0] = unknow
+  else:
+    dict_with_unknow['unknow'] = unknow
+  return dict_with_unknow
+  
 # 把训练数据文件aiwar_train_data，格式化到文件 normalized_training_data
 def distinct_features_from_org_training_data():
   brand_dict = {}
@@ -84,6 +104,11 @@ def distinct_features_from_org_training_data():
         sys.stdout.write('*')
         sys.stdout.flush()
   sys.stdout.write('\n')
+  
+  brand_dict = threshold_dict_with_unknow(brand_dict, Brand_Unknow_Threshold)
+  province_dict = threshold_dict_with_unknow(province_dict, Province_Unknow_Threshold)
+  apps_dict = threshold_dict_with_unknow(apps_dict, App_Unknow_Threshold, True)
+  
   return gender_dict, brand_dict, collections.OrderedDict(sorted(apps_dict.items())), province_dict, lines
   
 def from_normalized_file_to_original_data(file, gender_dict, brand_dict, apps_dict, province_dict):
@@ -141,17 +166,35 @@ def condiction_on_gender(gender_dict, brand_dict, apps_dict, province_dict, line
   for line in lines:
     features = extract_features(line)
     if features[1] == u'male':
-      male_brand_dict[features[2]] += 1
-      male_province_dict[features[4]] += 1
+      if male_brand_dict.get(features[2]) == None:
+        male_brand_dict['unknow'] += 1
+      else:
+        male_brand_dict[features[2]] += 1
+      if male_province_dict.get(features[4]) == None:
+        male_province_dict['unknow'] += 1
+      else:
+        male_province_dict[features[4]] += 1
       apps_list = features[3].split(',')
       for app in apps_list:
-        male_apps_dict[int(app)] += 1
+        if male_apps_dict.get(int(app)) == None:
+          male_apps_dict[0] += 1
+        else:
+          male_apps_dict[int(app)] += 1
     else:
-      female_brand_dict[features[2]] += 1
-      female_province_dict[features[4]] += 1
+      if female_brand_dict.get(features[2]) == None:
+        female_brand_dict['unknow'] += 1
+      else:
+        female_brand_dict[features[2]] += 1
+      if female_province_dict.get(features[4]) == None:
+        female_province_dict['unknow'] += 1
+      else:
+        female_province_dict[features[4]] += 1
       apps_list = features[3].split(',')
       for app in apps_list:
-        female_apps_dict[int(app)] += 1
+        if female_apps_dict.get(int(app)) == None:
+          female_apps_dict[0] += 1
+        else:
+          female_apps_dict[int(app)] += 1
     count += 1
     if count % 100000 == 0:
         sys.stdout.write('+')
@@ -161,7 +204,7 @@ def condiction_on_gender(gender_dict, brand_dict, apps_dict, province_dict, line
     
 def to_tabbed_file():
   gender_dict, brand_dict, apps_dict, province_dict, lines = distinct_features_from_org_training_data()
-  
+  gc.collect()
   write_to_file(True, gender_dict, brand_dict, apps_dict, province_dict, lines)
   gc.collect()
   write_to_file(False, gender_dict, brand_dict, apps_dict, province_dict, lines)
@@ -169,8 +212,8 @@ def to_tabbed_file():
   
   print '^'
   
-  if Global_Debug:
-    from_normalized_file_to_original_data(Tabbed_File, gender_dict, brand_dict, apps_dict, province_dict)
+  #if Global_Debug:
+  #  from_normalized_file_to_original_data(Tabbed_File, gender_dict, brand_dict, apps_dict, province_dict)
     
   save_statistics_file(Statistic_File + '_brands', brand_dict)
   save_statistics_file(Statistic_File + '_gender', gender_dict)
@@ -200,8 +243,13 @@ def to_tabbed_file():
 def write_to_file(onehot, gender_dict, brand_dict, apps_dict, province_dict, lines):
   chunk_list = chunks(lines, 50000)
   with ProcessPoolExecutor(multiprocessing.cpu_count()) as executor:
-    map_ret = executor.map(
-      functools.partial(mapreduce_to_tabbed_file, onehot, gender_dict, brand_dict, apps_dict, province_dict), chunk_list)
+    if Global_Debug:
+      map_ret = map(
+        functools.partial(mapreduce_to_tabbed_file, onehot, gender_dict, brand_dict, apps_dict, province_dict), chunk_list)
+    else:
+      map_ret = executor.map(
+        functools.partial(mapreduce_to_tabbed_file, onehot, gender_dict, brand_dict, apps_dict, province_dict), chunk_list)
+        
   sys.stdout.write('\n')
   sys.stdout.flush()
   
@@ -218,11 +266,7 @@ def write_to_file(onehot, gender_dict, brand_dict, apps_dict, province_dict, lin
     string_list_to_file(Tabbed_File, ret_list)
     sys.stdout.write('-')
     sys.stdout.flush()
-    #with codecs.open(Tabbed_File, 'w', 'utf-8') as f:
-    #  if Global_Debug:
-    #    print ret_list[0]
-    #  f.writelines(ret_list)
-      
+
     for l in ret_list:
       features = extract_features(l)
       if features[1] == u'male':
@@ -242,8 +286,7 @@ def write_to_file(onehot, gender_dict, brand_dict, apps_dict, province_dict, lin
     string_list_to_file(Undersample_Tabbed_File, undersample_data)
     sys.stdout.write('-')
     sys.stdout.flush()
-    #with codecs.open(Undersample_Tabbed_File, 'w', 'utf-8') as f:
-    #  f.writelines(undersample_data)
+
     undersample_data = []
     gc.collect()
     oversample_data = []
@@ -255,8 +298,7 @@ def write_to_file(onehot, gender_dict, brand_dict, apps_dict, province_dict, lin
     string_list_to_file(Oversample_Tabbed_File, oversample_data)
     sys.stdout.write('-')
     sys.stdout.flush()
-    #with codecs.open(Oversample_Tabbed_File, 'w', 'utf-8') as f:
-    #  f.writelines(oversample_data)
+
     oversample_data = []
     gc.collect()
 
@@ -285,8 +327,7 @@ def write_to_file(onehot, gender_dict, brand_dict, apps_dict, province_dict, lin
     string_list_to_file(Undersample_Onehot_File, undersample_onehot)
     sys.stdout.write('-')
     sys.stdout.flush()
-    #with codecs.open(Undersample_Onehot_File, 'w', 'utf-8') as f:
-    #  f.writelines(undersample_onehot)
+
     oversample_onehot = []
     for i in xrange(max(len(male_onehot), len(female_onehot))):
       oversample_onehot.append(male_onehot[i % len(male_onehot)])
@@ -296,8 +337,6 @@ def write_to_file(onehot, gender_dict, brand_dict, apps_dict, province_dict, lin
     string_list_to_file(Oversample_Onehot_File, oversample_onehot)
     sys.stdout.write('-')
     sys.stdout.flush()
-    #with codecs.open(Oversample_Onehot_File, 'w', 'utf-8') as f:
-    #  f.writelines(oversample_onehot)  
   
 def mapreduce_to_tabbed_file(onehot, gender_dict, brand_dict, apps_dict, province_dict, lines):
   #print 'gender', len(gender_dict), gender_dict
@@ -321,6 +360,7 @@ def mapreduce_to_tabbed_file(onehot, gender_dict, brand_dict, apps_dict, provinc
     index += 1
   
   max_key = apps_dict.keys()[len(apps_dict) - 1]
+  #print max_key
   count = 0
   feature_out = []
   # 下面这个是针对nparray文件用的
@@ -329,11 +369,15 @@ def mapreduce_to_tabbed_file(onehot, gender_dict, brand_dict, apps_dict, provinc
     features = extract_features(line)
     # applist onehot
     apps_list = features[3].split(',')
-    s = '0\t' * (max_key)
+    # 0 ... max_key
+    s = '0\t' * (max_key + 1) 
     s = list(s)
     for app in apps_list:
       # app 编号从1开始
-      s[(int(app) - 1) * 2] = '1'
+      if apps_dict.get((int(app)) * 2) == None:
+        s[0] = '1'
+      else:
+        s[(int(app)) * 2] = '1'
     s = ''.join(s)
     if onehot == False:
       feature_out.append(''.join([features[0], '\t', features[1], '\t', features[2], '\t', features[4], '\t', s[:-1], '\n']))
@@ -347,14 +391,20 @@ def mapreduce_to_tabbed_file(onehot, gender_dict, brand_dict, apps_dict, provinc
       brand_dict_len = len(brand_dict)
       brand_onehot = '0\t' * brand_dict_len
       brand_onehot = list(brand_onehot)
-      brand_onehot[brand_to_index[features[2]] * 2] = '1'
+      if brand_to_index.get(features[2]) == None:
+        brand_onehot[brand_to_index['unknow'] * 2] = '1'
+      else:
+        brand_onehot[brand_to_index[features[2]] * 2] = '1'
       brand_onehot = ''.join(brand_onehot)
       
       # province onehot
       province_dict_len = len(province_dict)
       province_onehot = '0\t' * province_dict_len
       province_onehot = list(province_onehot)
-      province_onehot[province_to_index[features[4]] * 2] = '1'
+      if province_to_index.get(features[4]) == None:
+        province_to_index[province_to_index['unknow'] * 2] = '1'
+      else:
+        province_onehot[province_to_index[features[4]] * 2] = '1'
       province_onehot = ''.join(province_onehot)
       
       onehot_out.append(''.join([features[0], '\t', gender_onehot, brand_onehot, province_onehot, s[:-1], '\n']))
@@ -378,14 +428,32 @@ def mapreduce_to_nparray_file(app_max, brands_count, gender_count, province_coun
   doc = codecs.open('split/undersample_onehot_split_0' + str(i),'r','utf-8')
   df = pd.read_csv(doc, sep='\t', header=None)
   array = df.as_matrix()
-  if Global_Debug:
-    print array
+  #if Global_Debug:
+  #  print array
   # id 
-  assert array.shape[1] == app_max + brands_count + province_count + gender_count + 1
+  # 0 .. app_max = app_max + 1
+  print array.shape[1], app_max + 1 + brands_count + province_count + gender_count + 1
+  assert array.shape[1] == app_max + 1 + brands_count + province_count + gender_count + 1
   print Undersample_Numpy_Array_File + str(i)
   np.save(Undersample_Numpy_Array_File + str(i), np.split(array, [1], axis=1)[1])
-  if Global_Debug:
-    print np.load(Undersample_Numpy_Array_File)
+  #if Global_Debug:
+  #  print np.load(Undersample_Numpy_Array_File)
+  return i
+  
+def mapreduce_to_nparray_file_oversample(app_max, brands_count, gender_count, province_count, i):
+  doc = codecs.open('split/oversample_onehot_training_data_0' + str(i),'r','utf-8')
+  df = pd.read_csv(doc, sep='\t', header=None)
+  array = df.as_matrix()
+  #if Global_Debug:
+  #  print array
+  # id 
+  # 0 .. app_max = app_max + 1
+  print array.shape[1], app_max + 1 + brands_count + province_count + gender_count + 1
+  assert array.shape[1] == app_max + 1 + brands_count + province_count + gender_count + 1
+  print Oversample_Numpy_Array_File + str(i)
+  np.save(Oversample_Numpy_Array_File + str(i), np.split(array, [1], axis=1)[1])
+  #if Global_Debug:
+  #  print np.load(Undersample_Numpy_Array_File)
   return i
 
 def tabbed_file_to_nparray_file():
@@ -397,7 +465,7 @@ def tabbed_file_to_nparray_file():
   
   with ProcessPoolExecutor(5) as executor:
     map_ret = executor.map(
-      functools.partial(mapreduce_to_nparray_file, app_max, brands_count, gender_count, province_count), range(10))
+      functools.partial(mapreduce_to_nparray_file_oversample, app_max, brands_count, gender_count, province_count), range(10))
   print map_ret
 
 if __name__ == "__main__":

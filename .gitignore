@@ -20,6 +20,10 @@ tabbed_training_data
 undersample_tabbed_training_data
 __t
 split
+aiwar_match_data
+aiwar_match_data.gz
+oversample_onehot_training_data
+undersample_onehot_training_data
 *.npy
 *.index
 *.meta

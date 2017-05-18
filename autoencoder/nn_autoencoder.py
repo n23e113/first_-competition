@@ -18,11 +18,12 @@ from q2_initialization import xavier_weight_init
 tf.logging.set_verbosity(tf.logging.ERROR)
 
 Global_Debug = False
+Share_Weight = False
 Undersample_Array = False
 Undersample_Numpy_Array_File = '../training_data/undersample_numpy_array.npy'
 Undersample_Numpy_Array_Files = '../training_data/undersample_numpy_array_'
-Oversample_Numpy_Array_File = '/media/lyk/317094AE34F3BB64/first_competition_npy/training_data/training_data_full/oversample_numpy_array.npy'
-Oversample_Numpy_Array_Files = '/media/lyk/317094AE34F3BB64/first_competition_npy/training_data/training_data_full/oversample_numpy_array_'
+Oversample_Numpy_Array_File = '../training_data/oversample_numpy_array.npy'
+Oversample_Numpy_Array_Files = '../training_data/oversample_numpy_array_'
 Statistics_Path = '../training_data/training_data_statistic'
 
 # Let's set the parameters of our model
@@ -55,20 +56,22 @@ class Config(object):
     self.province_dim = 34
     self.computer_brand_dim = 20
     self.input_dim = self.computer_brand_dim + self.province_dim + self.apps_dim
-    self.encoder_layer_1 = 1024
-    self.encoder_layer_2 = 16
+    self.encoder_layer_1 = 4096
+    self.encoder_layer_2 = 512
+    self.encoder_layer_3 = 16
     self.max_epochs = 100
     self.early_stopping = 5
     self.dropout = 1.0
     self.lr = 0.01
-    self.l2 = 0.002
+    self.l2 = 0.0
 
     if Global_Debug == False:
       statistic_dict = load_statistics_file(Statistics_Path)
       self.computer_brand_dim = int(statistic_dict['brands count'])
       self.province_dim = int(statistic_dict['province count'])
       self.apps_dim = int(statistic_dict['applist max number'])
-      self.input_dim = self.apps_dim + self.province_dim + self.computer_brand_dim
+      # 0 = unknow tag
+      self.input_dim = self.apps_dim + self.province_dim + self.computer_brand_dim + 1
 
 def generate_debug_data():
   # for debug purpose
@@ -236,25 +239,81 @@ class NN_Autoencoder_Model():
         tf.float32,
         tf.constant_initializer(0.0)
       )
+      
+      encoder_layer_3 = tf.get_variable(
+        'Encoder_Layer_3',
+        [self.config.encoder_layer_2, self.config.encoder_layer_3],
+        tf.float32,
+        xavier_weight_init(),
+        tf.contrib.layers.l2_regularizer(self.config.l2)
+      )
 
-      decoder_bias_1 = tf.get_variable(
-        'Decoder_Bias_1',
-        [self.config.encoder_layer_1],
+      encoder_bias_3 = tf.get_variable(
+        'Encoder_Bias_3',
+        [self.config.encoder_layer_3],
         tf.float32,
         tf.constant_initializer(0.0)
       )
 
+      decoder_layer_3 = tf.get_variable(
+        'Decoder_Layer_3',
+        [self.config.encoder_layer_3, self.config.encoder_layer_2],
+        tf.float32,
+        xavier_weight_init(),
+        tf.contrib.layers.l2_regularizer(self.config.l2)
+      )
+      
+      decoder_bias_3 = tf.get_variable(
+        'Decoder_Bias_3',
+        [self.config.encoder_layer_2],
+        tf.float32,
+        tf.constant_initializer(0.0)
+      )
+      
+      decoder_layer_2 = tf.get_variable(
+        'Decoder_Layer_2',
+        [self.config.encoder_layer_2, self.config.encoder_layer_1],
+        tf.float32,
+        xavier_weight_init(),
+        tf.contrib.layers.l2_regularizer(self.config.l2)
+      )
+      
       decoder_bias_2 = tf.get_variable(
         'Decoder_Bias_2',
+        [self.config.encoder_layer_1],
+        tf.float32,
+        tf.constant_initializer(0.0)
+      )
+      
+      decoder_layer_1 = tf.get_variable(
+        'Decoder_Layer_1',
+        [self.config.encoder_layer_1, self.config.input_dim],
+        tf.float32,
+        xavier_weight_init(),
+        tf.contrib.layers.l2_regularizer(self.config.l2)
+      )
+      
+      decoder_bias_1 = tf.get_variable(
+        'Decoder_Bias_1',
         [self.config.input_dim],
         tf.float32,
         tf.constant_initializer(0.0)
       )
 
-    encoder_output_1 = leaky_relu(tf.matmul(tf.nn.dropout(inputs, dropout), encoder_layer_1) + encoder_bias_1, 0.1)
-    encoder_output = leaky_relu(tf.matmul(tf.nn.dropout(encoder_output_1, dropout), encoder_layer_2) + encoder_bias_2, 0.1)
-    decoder_output_1 = leaky_relu(tf.matmul(tf.nn.dropout(encoder_output, dropout), tf.transpose(encoder_layer_2) + decoder_bias_1), 0.1)
-    decoder_output = tf.sigmoid(tf.matmul(tf.nn.dropout(decoder_output_1, dropout), tf.transpose(encoder_layer_1) + decoder_bias_2))
+    if Share_Weight == True:
+      encoder_output_1 = leaky_relu(tf.matmul(tf.nn.dropout(inputs, dropout), encoder_layer_1) + encoder_bias_1, 0.1)
+      encoder_output_2 = leaky_relu(tf.matmul(tf.nn.dropout(encoder_output_1, dropout), encoder_layer_2) + encoder_bias_2, 0.1)
+      encoder_output = leaky_relu(tf.matmul(tf.nn.dropout(encoder_output_2, dropout), encoder_layer_3) + encoder_bias_3, 0.1)
+      decoder_output_1 = leaky_relu(tf.matmul(tf.nn.dropout(encoder_output, dropout), tf.transpose(encoder_layer_3)) + decoder_bias_3, 0.1)
+      decoder_output_2 = leaky_relu(tf.matmul(tf.nn.dropout(decoder_output_1, dropout), tf.transpose(encoder_layer_2)) + decoder_bias_2, 0.1)
+      decoder_output = tf.sigmoid(tf.matmul(tf.nn.dropout(decoder_output_2, dropout), tf.transpose(encoder_layer_1)) + decoder_bias_1)
+    else:
+      encoder_output_1 = leaky_relu(tf.matmul(tf.nn.dropout(inputs, dropout), encoder_layer_1) + encoder_bias_1, 0.1)
+      encoder_output_2 = leaky_relu(tf.matmul(tf.nn.dropout(encoder_output_1, dropout), encoder_layer_2) + encoder_bias_2, 0.1)
+      encoder_output = leaky_relu(tf.matmul(tf.nn.dropout(encoder_output_2, dropout), encoder_layer_3) + encoder_bias_3, 0.1)
+      decoder_output_1 = leaky_relu(tf.matmul(tf.nn.dropout(encoder_output, dropout), decoder_layer_3) + decoder_bias_3, 0.1)
+      decoder_output_2 = leaky_relu(tf.matmul(tf.nn.dropout(decoder_output_1, dropout), decoder_layer_2) + decoder_bias_2, 0.1)
+      decoder_output = tf.sigmoid(tf.matmul(tf.nn.dropout(decoder_output_2, dropout), decoder_layer_1) + decoder_bias_1)
 
     return decoder_output, encoder_output
 
@@ -370,4 +429,7 @@ if __name__ == "__main__":
     print 'save outputs ...'
     outputs = np.concatenate(tuple(output for output in encoder_outputs), axis=0)
     outputs = np.concatenate((model.test_data['label'], outputs), axis=1)
-    np.save('test_data_encoder_output.npy', outputs)
+    if Share_Weight == True:
+      np.save('test_data_encoder_output.share_weight.npy', outputs)
+    else:
+      np.save('test_data_encoder_output.non_share_weight.npy', outputs)

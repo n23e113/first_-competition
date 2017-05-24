@@ -21,7 +21,6 @@ parser.add_argument("--infer", help="output predict", action="store_true")
 parser.add_argument("--threshold", type=float, default=0.5, help="predict threshold, if predict[0] > threshold : male")
 parser.add_argument("--globaldebug", help="turn global debug on, use hardcoded testing data", action="store_true")
 parser.add_argument("--undersample", help="use undersampled training data", action="store_true")
-parser.add_argument("--modelpath", help="specify model path", default='./nn_baseline.best_weights')
 args = parser.parse_args()
 
 import tensorflow as tf
@@ -35,7 +34,6 @@ Global_Debug = args.globaldebug
 Undersample_Array = args.undersample
 print 'Global_Debug : ', Global_Debug, ' \nUndersample_Array : ', Undersample_Array
 print 'threshold : ', args.threshold
-print 'model path', args.modelpath
 Undersample_Numpy_Array_File = '../training_data/undersample_numpy_array.npy'
 Undersample_Numpy_Array_Files = '../training_data/undersample_numpy_array_'
 #Oversample_Numpy_Array_File = '/media/lyk/317094AE34F3BB64/first_competition_npy/training_data/training_data_full/oversample_numpy_array.npy'
@@ -76,13 +74,18 @@ class Config(object):
     self.province_dim = 34
     self.computer_brand_dim = 20
     self.input_dim = self.computer_brand_dim + self.province_dim + self.apps_dim
+    self.province_embedding_dim = 8
+    self.computer_brand_embedding_dim = 16
+    self.apps_hidden_size_1 = 1024
+    self.apps_nn_output_dim = 512
+    self.hidden_input_dim = self.computer_brand_embedding_dim + self.province_embedding_dim + self.apps_nn_output_dim
     self.hidden_size_1 = 4096
     self.hidden_size_2 = 1024
     self.hidden_size_3 = 32
     self.output_class = 2
     self.max_epochs = 100
     self.early_stopping = 10
-    self.dropout = 0.75
+    self.dropout = 1.0
     self.lr = 0.01
     self.l2 = 0.0
 
@@ -90,9 +93,10 @@ class Config(object):
       statistic_dict = load_statistics_file(Statistics_Path)
       self.computer_brand_dim = int(statistic_dict['brands count'])
       self.province_dim = int(statistic_dict['province count'])
-      self.apps_dim = int(statistic_dict['applist max number'])
+      self.apps_dim = int(statistic_dict['applist max number']) + 1
       # add applist unknow tag
-      self.input_dim = self.apps_dim + self.province_dim + self.computer_brand_dim + 1
+      self.input_dim = self.apps_dim + self.province_dim + self.computer_brand_dim
+      self.hidden_input_dim = self.computer_brand_embedding_dim + self.province_embedding_dim + self.apps_nn_output_dim
 
 def generate_debug_data():
   # for debug purpose
@@ -235,13 +239,35 @@ class NN_Baseline_Model():
 
   def build_model(self, inputs, dropout, phase):
 
+    computer_brand_onehot, province_onehot, apps_bitmap = tf.split(
+      inputs, [self.config.computer_brand_dim, self.config.province_dim, self.config.apps_dim], 1)
+    print apps_bitmap.shape, province_onehot.shape, computer_brand_onehot.shape
+    
+    with tf.variable_scope('NN_Embedding') as scope:
+      with tf.device('/cpu:0'):
+        province_embedding = tf.get_variable(
+          "Province_Embedding",
+          [self.config.province_dim, self.config.province_embedding_dim],
+          tf.float32)
+        province = tf.nn.embedding_lookup(
+          province_embedding, tf.argmax(province_onehot, axis=1))
+        print province.shape
+          
+      with tf.device('/cpu:0'):
+        computer_brand_embedding = tf.get_variable(
+          "Computer_Brand_Embedding",
+          [self.config.computer_brand_dim, self.config.computer_brand_embedding_dim],
+          tf.float32)
+        computer_brand = tf.nn.embedding_lookup(
+          computer_brand_embedding, tf.argmax(computer_brand_onehot, axis=1))
+        print computer_brand.shape
+  
     with tf.variable_scope('NN_Baseline') as scope:
       h1 = tf.get_variable(
         'Hidden_Layer_1',
-        [self.config.input_dim, self.config.hidden_size_1],
+        [self.config.hidden_input_dim, self.config.hidden_size_1],
         tf.float32,
-        xavier_weight_init(),
-        tf.contrib.layers.l2_regularizer(self.config.l2)
+        regularizer=tf.contrib.layers.l2_regularizer(self.config.l2)
       )
 
       b1 = tf.get_variable(
@@ -255,8 +281,7 @@ class NN_Baseline_Model():
         'Hidden_Layer_2',
         [self.config.hidden_size_1, self.config.hidden_size_2],
         tf.float32,
-        xavier_weight_init(),
-        tf.contrib.layers.l2_regularizer(self.config.l2)
+        regularizer=tf.contrib.layers.l2_regularizer(self.config.l2)
       )
 
       b2 = tf.get_variable(
@@ -270,8 +295,7 @@ class NN_Baseline_Model():
         'Hidden_Layer_3',
         [self.config.hidden_size_2, self.config.hidden_size_3],
         tf.float32,
-        xavier_weight_init(),
-        tf.contrib.layers.l2_regularizer(self.config.l2)
+        regularizer=tf.contrib.layers.l2_regularizer(self.config.l2)
       )
 
       b3 = tf.get_variable(
@@ -281,22 +305,91 @@ class NN_Baseline_Model():
         tf.constant_initializer(0.0)
       )
 
-      output_weights = tf.get_variable(
+      nn_output_weights = tf.get_variable(
         'Output_Layer',
         [self.config.hidden_size_3, self.config.output_class],
         tf.float32,
-        xavier_weight_init(),
-        tf.contrib.layers.l2_regularizer(self.config.l2)
+        regularizer=tf.contrib.layers.l2_regularizer(self.config.l2)
       )
 
-      output_bias = tf.get_variable(
+      nn_output_bias = tf.get_variable(
         'Bias_output',
         [self.config.output_class],
         tf.float32,
         tf.constant_initializer(0.0)
       )
+      
+      apps_nn_weights_1 = tf.get_variable(
+        'Apps_nn_weights_1',
+        [self.config.apps_dim, self.config.apps_hidden_size_1],
+        tf.float32,
+        regularizer=tf.contrib.layers.l2_regularizer(self.config.l2)
+      )
+      
+      apps_nn_bias_1 = tf.get_variable(
+        'Apps_nn_bias_1',
+        [self.config.apps_hidden_size_1],
+        tf.float32,
+        tf.constant_initializer(0.0)
+      )
+      
+      apps_nn_weights_2 = tf.get_variable(
+        'Apps_nn_weights_2',
+        [self.config.apps_hidden_size_1, self.config.apps_nn_output_dim],
+        tf.float32,
+        regularizer=tf.contrib.layers.l2_regularizer(self.config.l2)
+      )
+      
+      apps_nn_bias_2 = tf.get_variable(
+        'Apps_nn_bias_2',
+        [self.config.apps_nn_output_dim],
+        tf.float32,
+        tf.constant_initializer(0.0)
+      )
 
-    local1 = tf.matmul(tf.nn.dropout(inputs, dropout), h1) + b1
+      linear_weights = tf.get_variable(
+        'Linear_Layer_1',
+        [self.config.input_dim, self.config.output_class],
+        tf.float32,
+        regularizer=tf.contrib.layers.l2_regularizer(self.config.l2)
+      )
+
+      linear_bias = tf.get_variable(
+        'Linear_Bias_1',
+        [self.config.output_class],
+        tf.float32,
+        tf.constant_initializer(0.0)
+      )
+      
+      final_output_weights = tf.get_variable(
+        'Final_Layer',
+        [4, self.config.output_class],
+        tf.float32,
+        regularizer=tf.contrib.layers.l2_regularizer(self.config.l2)
+      )
+
+      final_output_bias = tf.get_variable(
+        'Final_Bias',
+        [self.config.output_class],
+        tf.float32,
+        tf.constant_initializer(0.0)
+      )
+
+    apps_nn_output_linear_1 = tf.matmul(tf.nn.dropout(apps_bitmap, dropout), apps_nn_weights_1) + apps_nn_bias_1
+    apps_nn_output_1 = tf.contrib.layers.batch_norm(apps_nn_output_linear_1, center=True, scale=True, 
+                                       is_training=phase, activation_fn=None,
+                                       zero_debias_moving_mean=True,
+                                       scope='apps_bn1')
+    apps_nn_activate_1 = leaky_relu(apps_nn_output_1, 0.1)
+    apps_nn_output_linear_2 = tf.matmul(tf.nn.dropout(apps_nn_activate_1, dropout), apps_nn_weights_2) + apps_nn_bias_2
+    apps_nn_output_2 = tf.contrib.layers.batch_norm(apps_nn_output_linear_2, center=True, scale=True, 
+                                       is_training=phase, activation_fn=None,
+                                       zero_debias_moving_mean=True,
+                                       scope='apps_bn2')
+    apps_nn_activate_2 = leaky_relu(apps_nn_output_2, 0.1)
+    
+    local1 = tf.matmul(tf.nn.dropout(
+      tf.concat([computer_brand, province, apps_nn_activate_2], 1), dropout), h1) + b1
     # do not apply activation function in bn, use leakyrelu
     bn1 = tf.contrib.layers.batch_norm(local1, center=True, scale=True, 
                                        is_training=phase, activation_fn=None,
@@ -320,7 +413,24 @@ class NN_Baseline_Model():
                                        scope='bn3')
     activate3 = leaky_relu(bn3, 0.1)
     
-    linear_output = tf.matmul(tf.nn.dropout(activate3, dropout), output_weights) + output_bias    
+    #nn_output = tf.matmul(tf.nn.dropout(activate3, dropout), nn_output_weights) + nn_output_bias
+    #bn_nn_out = tf.contrib.layers.batch_norm(nn_output, center=True, scale=True, 
+    #                                   is_training=phase, activation_fn=None,
+    #                                   zero_debias_moving_mean=True,
+    #                                   scope='bn_nn_out')
+    #activate_nn = leaky_relu(bn_nn_out, 0.1)
+    #
+    #linear_output = tf.matmul(tf.nn.dropout(inputs, dropout), linear_weights) + linear_bias
+    #bn_linear_out = tf.contrib.layers.batch_norm(linear_output, center=True, scale=True, 
+    #                                   is_training=phase, activation_fn=None,
+    #                                   zero_debias_moving_mean=True,
+    #                                   scope='bn_linear_out')
+    #activate_linear = leaky_relu(bn_linear_out, 0.1)
+    
+    
+                                       
+    final_output = tf.matmul(tf.nn.dropout(tf.concat([activate_nn, bn_linear_out], 1), dropout), final_output_weights) + final_output_bias
+
     return linear_output
 
   def __init__(self, config):
@@ -485,7 +595,7 @@ def test():
   session_config.gpu_options.allow_growth = True
 
   with tf.Session(config=session_config) as session:
-    saver.restore(session, args.modelpath)
+    saver.restore(session, './nn_baseline.best_weights')
     test_loss, test_predict = model.run_epoch(session, model.test_data)
     print '** Test loss: {}'.format(test_loss)
     make_conf(model.test_data['label'], test_predict)
@@ -514,7 +624,7 @@ def infer():
   session_config.gpu_options.allow_growth = True
 
   with tf.Session(config=session_config) as session:
-    saver.restore(session, args.modelpath)
+    saver.restore(session, './nn_baseline.best_weights')
     predict = model.infer(session, model.competition_data)
     print 'save result ...'
     to_result_file(predict)
@@ -528,7 +638,7 @@ def valid():
   session_config.gpu_options.allow_growth = True
 
   with tf.Session(config=session_config) as session:
-    saver.restore(session, args.modelpath)
+    saver.restore(session, './nn_baseline.best_weights')
     test_loss, test_predict = model.run_epoch(session, model.valid_data)
     print '** Valid loss: {}'.format(test_loss)
     make_conf(model.valid_data['label'], test_predict)

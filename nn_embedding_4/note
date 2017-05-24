@@ -1,0 +1,4 @@
+applist -> nn -> -------------\
+brand -> embedding ------------- nn -> nn sigmoid
+province -> embedding --------/      /
+applist brand province -> linear -> /

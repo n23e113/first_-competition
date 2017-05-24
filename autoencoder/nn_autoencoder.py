@@ -380,7 +380,7 @@ def make_conf(labels, predictions):
   print confmat
   print 'tpr', confmat[0, 0] * 1.0 / (confmat[0, 0] + confmat[0, 1])
   print 'tnr', confmat[1, 1] * 1.0 / (confmat[1, 0] + confmat[1, 1])
-  tp = confmat[0, 0] + confmat[0, 1]
+  tp = confmat[0, 0]
   fp = confmat[1, 0]
   fn = confmat[0, 1]
   print 'f1=2tp/(2tp+fp+fn):', 2.0*tp/(2.0*tp + fp + fn)

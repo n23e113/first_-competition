@@ -9,10 +9,20 @@ import unicodecsv as csv
 import multiprocessing
 import gc
 import numpy as np
+import argparse
 
-Global_Debug = False
-Training_Data_File = 'aiwar_train_data'
-Competition_Data_File = 'aiwar_match_data'
+parser = argparse.ArgumentParser()
+parser.add_argument("--globaldebug", help="turn global debug on, use hardcoded testing data", action="store_true")
+parser.add_argument("--gentabbed", help="", action="store_true")
+parser.add_argument("--tabbedtonp", help="", action="store_true")
+parser.add_argument("--componehottonp", help="", action="store_true")
+parser.add_argument("--toboolnpy", help="", action="store_true")
+
+args = parser.parse_args()
+
+Global_Debug = args.globaldebug
+Training_Data_File = 'train_data'
+Competition_Data_File = 'match_data'
 
 if Global_Debug :
   Training_Data_File = 'unittest'
@@ -526,7 +536,24 @@ def tabbed_file_to_nparray_file():
     map_ret = executor.map(
       functools.partial(mapreduce_to_nparray_file_oversample, app_max, brands_count, gender_count, province_count), range(10))
   print map_ret
+  
+def competition_onehot_to_np():
+  doc = codecs.open('competition_onehot_data', 'r', 'utf-8')
+  df = pd.read_csv(doc, sep='\t', header=None)
+  array = df.as_matrix()
+  np.save('competition_onehot_nparray.npy', np.split(array, [1], axis=1)[1])
+  
+def trainnp_to_trainboolnp():
+  data = np.load('oversample_numpy_array.npy')
+  data = data.astype(np.bool)
+  np.save('oversample_numpy_bool_array.npy', data)
 
 if __name__ == "__main__":
-  to_tabbed_file()
-  #tabbed_file_to_nparray_file()
+  if args.gentabbed:
+    to_tabbed_file()
+  if args.tabbedtonp:
+    tabbed_file_to_nparray_file()
+  if args.componehottonp:
+    competition_onehot_to_np()
+  if args.toboolnpy:
+    trainnp_to_trainboolnp()
